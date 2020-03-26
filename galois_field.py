@@ -10,7 +10,7 @@ class GaloisField():
     """
 
     def __init__(self, primitive_polynomial: bin, field_order: int,
-                 generator: int = 2):
+                 alpha: int = 2):
         """
         Parameters
         ----------
@@ -23,7 +23,7 @@ class GaloisField():
             to reduce the overflows back into the range of the Galois Field wi-
             thout duplicating values (all values should be unique).
 
-        generator: int, default=2
+        alpha: int, default=2
             Generator number (the "increment" that will be used to walk through
             the field by multiplication, this must be a prime number). This is
             basically the base of the logarithm/anti-log tables. Also often no-
@@ -38,10 +38,11 @@ class GaloisField():
 
         self.primitive_polynomial = primitive_polynomial
         self.field_order = field_order
-        self.generator = generator
+        self.alpha = alpha
+        self.max_field_value = int(2**field_order - 1)
         self.look_up_tables = self.look_up_tables(primitive_polynomial,
                                                   field_order,
-                                                  generator)
+                                                  alpha)
 
     def primes_3_to_n(self, n: int) -> np.array:
         """Returns a array of primes, 3 <= p < n (Faster & more memory-wise num
@@ -71,10 +72,10 @@ class GaloisField():
                 sieving_range[i*i//2::i] = False
         return 2 * np.nonzero(sieving_range)[0][1::] + 1
 
-    def prime_polynomials(self, field_order: int, generator: int = 2,
+    def prime_polynomials(self, field_order: int, alpha: int = 2,
                           fast_primes: bool = False,
                           first_prime: bool = False) -> list:
-        """Compute the list of prime polynomials for the given generator and ga
+        """Compute the list of prime polynomials for the given alpha and ga
         lois field prime exponent. Bruteforce approach.
 
         Parameters
@@ -83,7 +84,7 @@ class GaloisField():
             Order of the field, i.e 2^p, in which the search for prime po-
             lynomials will be done.
 
-        generator: int, default=2
+        alpha: int, default=2
            Generator number (the "increment" that will be used to walk through
            the field by multiplication, this must be a prime number). This is
            basically the base of the logarithm/anti-log tables. Also often no-
@@ -124,7 +125,7 @@ class GaloisField():
 
             x = 1
             for i in range(max_field_value):
-                x = self.gf_mult_noLUT(x, generator, prim_candidate,
+                x = self.gf_mult_noLUT(x, alpha, prim_candidate,
                                        max_field_value+1)
 
                 if x > max_field_value or seen[x] == 1:  # not prime
@@ -141,7 +142,7 @@ class GaloisField():
         return correct_primes
 
     def look_up_tables(self, primitive_polynomial: bin, field_order: int,
-                       generator: int = 2):
+                       alpha: int = 2):
         """Precompute the logarithm and anti-log tables for faster computation
         later, using the provided primitive polynomial.
 
@@ -149,7 +150,7 @@ class GaloisField():
         lue in the galois field 2^field_order, we will pre-compute the logari-
         thm and anti-logarithm (exponential) of this value, to do that, we gene
         rate the Galois Field GF(2^p) by building a list starting with the ele
-        ment 0 followed by the (p-1) succesive powers of the generator a : 1,
+        ment 0 followed by the (p-1) succesive powers of the alpha a : 1,
         a, a^1, a^2, ..., a^(p-1).
 
         Parameters
@@ -163,7 +164,7 @@ class GaloisField():
             to reduce the overflows back into the range of the Galois Field wi-
             thout duplicating values (all values should be unique).
 
-        generator: int, default=2
+        alpha: int, default=2
             Generator number (the "increment" that will be used to walk through
             the field by multiplication, this must be a prime number). This is
             basically the base of the logarithm/anti-log tables. Also often no-
@@ -176,7 +177,7 @@ class GaloisField():
         -------
         gf_exp: list
             Anti-log (exponential) table. The first two elements will always be
-            [GF(2^p)int(1), generator].
+            [GF(2^p)int(1), alpha].
 
         gf_log: list
             Log table, log[0] is impossible and thus unused.
@@ -191,7 +192,7 @@ class GaloisField():
         for i in range(max_field_value):
             gf_exp[i] = x
             gf_log[x] = i
-            x = self.gf_mult_noLUT(x, generator, max_field_value+1,
+            x = self.gf_mult_noLUT(x, alpha, max_field_value+1,
                                    primitive_polynomial)
 
         for i in range(max_field_value, max_field_value * 2):
@@ -319,6 +320,7 @@ class GaloisField():
             The result of p + q.
         """
         r = np.zeros(max(len(p), len(q)))
+        # r = [0] * (len(p)+len(q)-1)
         for i in range(len(p)):
             r[i + len(r) - len(p)] = p[i]
         for i in range(len(q)):
@@ -326,8 +328,7 @@ class GaloisField():
         return r
 
     def gf_poly_mul(self, p, q):
-        """Multiply two polynomials, inside Galois Field (but the procedure is
-        generic). Optimized function by precomputation of log.
+        """Multiply two polynomials, inside Galois Field.
 
         Compute the polynomial multiplication (just like the outer product of
         two vectors, we multiply each coefficients of p with all coefficients
@@ -346,7 +347,8 @@ class GaloisField():
         r: list
             The result of p * q.
         """
-        r = [0] * (len(p) + len(q) - 1)
+        # r = np.zeros(len(p) + len(q) - 1)
+        r = [0] * (len(p)+len(q)-1)
         lp = [gf_log[p[i]] for i in range(len(p))]
         for j in range(len(q)):
             qj = q[j]  # optimization: load the coefficient once
@@ -390,7 +392,7 @@ class GaloisField():
         Returns
         -------
         msg_out: list
-            quotient, remainder.
+            quotient and remainder of the division.
         """
 
         # Copy the dividend list and pad with 0 where the ecc bytes will be computed
@@ -405,15 +407,23 @@ class GaloisField():
         separator = -(len(divisor)-1)
         return msg_out[:separator], msg_out[separator:]
 
-    def gf_poly_eval(self, poly, x):
+    def gf_poly_eval(self, poly: list, x: int):
         """Evaluates a polynomial in GF(2^p) given the value for x. This is ba-
         sed on Horner's scheme for maximum efficiency.
 
         Parameters
         ----------
+        poly: list
+            Polynomial coefficients, in descending order of powers of x.
+
+        x: int
+            Value to evaluate the polynomial.
 
         Returns
         -------
+        y: list
+            Polynomial evaluated at x.
+
         """
         y = poly[0]
         for i in range(1, len(poly)):
@@ -422,6 +432,5 @@ class GaloisField():
 
 
 if __name__ == "__main__":
-    gf_16 = GaloisField(0x11D, 8)
-    print(len(gf_16.look_up_tables[0]))
-    print(gf_16.gf_poly_scale([2, 3, 5], 2))
+    gf_16 = GaloisField(0x13, 4)
+    print((gf_16.look_up_tables))

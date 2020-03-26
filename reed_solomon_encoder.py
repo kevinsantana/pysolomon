@@ -1,61 +1,143 @@
-################### REED-SOLOMON ENCODING ###################
+from galois_field import GaloisField
 
-def rs_generator_poly(nsym, fcr=0, generator=2):
-    '''Generate an irreducible generator polynomial (necessary to encode a message into Reed-Solomon)'''
-    g = [1]
-    for i in xrange(nsym):
-        g = gf_poly_mul(g, [1, gf_pow(generator, i+fcr)])
-    return g
 
-def rs_generator_poly_all(max_nsym, fcr=0, generator=2):
-    '''Generate all irreducible generator polynomials up to max_nsym (usually you can use n, the length of the message+ecc). Very useful to reduce processing time if you want to encode using variable schemes and nsym rates.'''
-    g_all = {}
-    g_all[0] = g_all[1] = [1]
-    for nsym in xrange(max_nsym):
-        g_all[nsym] = rs_generator_poly(nsym, fcr, generator)
-    return g_all
+class RS_Encoder(GaloisField):
+    """Reed–Solomon codes are encoded by dividing the polynomial representing
+    the message by an irreducible generator polynomial, and then the remainder
+    is the RS code, which we will just append to the original message.
+    """
 
-def rs_simple_encode_msg(msg_in, nsym, fcr=0, generator=2, gen=None):
-    '''Simple Reed-Solomon encoding (mainly an example for you to understand how it works, because it's slower than the inlined function below)'''
-    global field_charac
-    if (len(msg_in) + nsym) > field_charac: raise ValueError("Message is too long (%i when max is %i)" % (len(msg_in)+nsym, field_charac))
-    if gen is None: gen = rs_generator_poly(nsym, fcr, generator)
+    def __init__(self, galois: GaloisField):
+        self.galois = galois
 
-    # Pad the message, then divide it by the irreducible generator polynomial
-    _, remainder = gf_poly_div(msg_in + [0] * (len(gen)-1), gen)
-    # The remainder is our RS code! Just append it to our original message to get our full codeword (this represents a polynomial of max 256 terms)
-    msg_out = msg_in + remainder
-    # Return the codeword
-    return msg_out
+    def rs_generator_poly(self, t: int, fcr: int = 0, alpha: int = 2):
+        """Generate an irreducible generator polynomial (necessary to encode a
+        message into Reed-Solomon).
 
-def rs_encode_msg(msg_in, nsym, fcr=0, generator=2, gen=None):
-    '''Reed-Solomon main encoding function, using polynomial division (Extended Synthetic Division, the fastest algorithm available to my knowledge), better explained at http://research.swtch.com/field'''
-    global field_charac
-    if (len(msg_in) + nsym) > field_charac: raise ValueError("Message is too long (%i when max is %i)" % (len(msg_in)+nsym, field_charac))
-    if gen is None: gen = rs_generator_poly(nsym, fcr, generator)
-    # Init msg_out with the values inside msg_in and pad with len(gen)-1 bytes (which is the number of ecc symbols).
-    msg_out = [0] * (len(msg_in) + len(gen)-1)
-    # Initializing the Synthetic Division with the dividend (= input message polynomial)
-    msg_out[:len(msg_in)] = msg_in
+        Parameters
+        ----------
+        t: int
+            Number of error correcting symbols (nsym).
 
-    # Synthetic division main loop
-    for i in xrange(len(msg_in)):
-        # Note that it's msg_out here, not msg_in. Thus, we reuse the updated value at each iteration
-        # (this is how Synthetic Division works: instead of storing in a temporary register the intermediate values,
-        # we directly commit them to the output).
-        coef = msg_out[i]
+        fcr: int, default=0
+            First consecutive root, this allows to specify the value to "jump"
+            when computing the sequential terms of the generator polynomial.
+            Usually set at 0, but bounded between 0 and the Galois Field's car
+            dinality (eg, 255 for GF(2^8)).
 
-        # log(0) is undefined, so we need to manually check for this case.
-        if coef != 0:
-            # in synthetic division, we always skip the first coefficient of the divisior, because it's only used to normalize the dividend coefficient (which is here useless since the divisor, the generator polynomial, is always monic)
-            for j in xrange(1, len(gen)):
-                #if gen[j] != 0: # log(0) is undefined so we need to check that, but it slow things down in fact and it's useless in our case (reed-solomon encoding) since we know that all coefficients in the generator are not 0
-                msg_out[i+j] ^= gf_mul(gen[j], coef) # equivalent to msg_out[i+j] += gf_mul(gen[j], coef)
+        alpha: int, default=2
+           Generator number (the "increment" that will be used to walk through
+           the field by multiplication, this must be a prime number). This is
+           basically the base of the logarithm/anti-log tables. Also often no-
+           ted α (alpha) in academic books.
 
-    # At this point, the Extended Synthetic Divison is done, msg_out contains the quotient in msg_out[:len(msg_in)]
-    # and the remainder in msg_out[len(msg_in):]. Here for RS encoding, we don't need the quotient but only the remainder
-    # (which represents the RS code), so we can just overwrite the quotient with the input message, so that we get
-    # our complete codeword composed of the message + code.
-    msg_out[:len(msg_in)] = msg_in
+        Returns
+        -------
+        g: list
+            Irreducible generator polynomial.
+        """
+        g = [1]
+        for i in range(t):
+            g = super().gf_poly_mul(g, [1, super().gf_pow(alpha, i + fcr)])
+        return g
 
-    return msg_out
+    def rs_generator_poly_all(self, max_t: int, fcr: int = 0, alpha=2):
+        """Generate all irreducible generator polynomials up to max_t (usually
+        you can use n, the length of the message+ecc). Very useful to reduce pro
+        cessing time if you want to encode using variable schemes and k rates.
+
+        Parameters
+        ---------
+        max_t: int
+            n, the length of the message+ecc.
+
+        fcr: int, default=0
+            First consecutive root, this allows to specify the value to "jump" when
+            computing the sequential terms of the generator polynomial. Usually set
+            at 0, but bounded between 0 and the Galois Field's cardinality (eg, 255
+            for GF(2^8)).
+
+        alpha: int, default=2
+           Generator number (the "increment" that will be used to walk through
+           the field by multiplication, this must be a prime number). This is
+           basically the base of the logarithm/anti-log tables. Also often no-
+           ted α (alpha) in academic books.
+
+        Returns
+        -------
+        g_all: list
+            All irreducible generator polynomials up to max_t.
+
+        """
+        g_all = {}
+        g_all[0] = g_all[1] = [1]
+        for t in range(max_t):
+            g_all[t] = self.rs_generator_poly(t, fcr, alpha)
+        return g_all
+
+    def rs_encode_msg(self, msg_in: list, t: int, fcr=0, alpha=2,
+                      generator_polynomial=None):
+        """Reed-Solomon main encoding function.
+
+        Parameters
+        ----------
+        msg_in: list
+            Input message polynomial, i.e dividend.
+
+        t: int
+            Number of error correcting symbols (nsym).
+
+        fcr: int
+            First consecutive root, this allows to specify the value to "jump"
+            when computing the sequential terms of the generator polynomial.
+            Usually set at 0, but bounded between 0 and the Galois Field's car
+            dinality (eg, 255 for GF(2^8)).
+
+        alpha: int
+            This must be a prime integer, such as 2, 3, 5, etc. In practice,
+            what is the generator? You know, when we use the log/antilog tables
+            to do our computations, from what are these tables generated from?
+            You guessed it: the generator number. Usually, it's set to 2, so the
+            log/antilog tables are generated by computing the sequence of powers:
+            0, 2^0, 2^1, ..., 2^p. We can then almost entirely work with these
+            log/antilog tables, except at the first stage of encoding, and at
+            the first and last stage of decoding, because we need to convert ba
+            ck and forth from/to the input numbers to the log/antilog tables va
+            lues.
+
+        generator_polynomial
+            Irreducible generator polynomial.
+
+        Returns
+        -------
+        msg_out: list
+            msg_out contains the quotient in msg_out[:len(msg_in)] and the rema
+            inder in msg_out[len(msg_in):]. Here for RS encoding, we don't need
+            the quotient but only the remainder (which represents the RS code),
+            so we can just overwrite the quotient with the input message, so that
+            we get our complete codeword composed of the message + code.
+
+        Raises
+        ------
+        ValueError
+            If the msg_in is too long.
+        """
+        if (len(msg_in) + t) > self.galois.max_field_value:
+            raise ValueError(f"Message is too long {len(msg_in)+t} when max is {self.galois.max_field_value}")
+        generator_polynomial = self.rs_generator_poly(t)
+        _, remainder = super().gf_poly_div(msg_in + [0] * (len(generator_polynomial)-1),
+                                           generator_polynomial)
+        # msg_out = msg_in + remainder
+        return msg_in, remainder
+
+
+if __name__ == "__main__":
+    gf_285 = GaloisField(0x11d, 8)
+    print(len(gf_285.look_up_tables[0]))
+    n = 285
+    k = 239
+    message = "hello world"
+    rs_encoder = RS_Encoder(gf_285)
+    encoded, ecc = rs_encoder.rs_encode_msg([ord(x) for x in message], n-k)
+    print(f"Original: {encoded}")
+    print(f"Ecc symbols: {len(ecc)}")
