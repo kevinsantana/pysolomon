@@ -1,4 +1,8 @@
+from math import ceil
+from base64 import b64encode, b64decode
+
 from galois_field import GaloisField
+from utils import char_to_int, chunk_message, int_to_char, corruption
 
 
 class RS_Encoder(GaloisField):
@@ -17,7 +21,8 @@ class RS_Encoder(GaloisField):
         Parameters
         ----------
         t: int
-            Number of error correcting symbols (nsym).
+            Number of error correcting symbols (degree of the generator polyno-
+            mial).
 
         fcr: int, default=0
             First consecutive root, this allows to specify the value to "jump"
@@ -75,17 +80,26 @@ class RS_Encoder(GaloisField):
             g_all[t] = self.rs_generator_poly(t, fcr, alpha)
         return g_all
 
-    def rs_encode_msg(self, msg_in: list, t: int, fcr=0, alpha=2,
+    def correction_capacity(self, n: int, degradation_percentage: int):
+        t_candidate = ceil((degradation_percentage/100) * n)
+        k = (n-t_candidate)
+        t = (n-k) if (n-k) % 2 == 0 else (n-k-1)
+        return int(k), int(t)
+
+    def rs_encode_msg(self, msg_in: list, field_order: int, fcr=0, alpha=2,
+                      degradation_percentage: int = 15,
                       generator_polynomial=None):
         """Reed-Solomon main encoding function.
 
         Parameters
         ----------
         msg_in: list
-            Input message polynomial, i.e dividend.
+            Input message polynomial, i.e dividend. In base64 format.
 
-        t: int
-            Number of error correcting symbols (nsym).
+        field_order: int
+            Order of the field, i.e 2^p.
+
+        degradation_percentage: int
 
         fcr: int
             First consecutive root, this allows to specify the value to "jump"
@@ -122,22 +136,31 @@ class RS_Encoder(GaloisField):
         ValueError
             If the msg_in is too long.
         """
-        if (len(msg_in) + t) > self.galois.max_field_value:
-            raise ValueError(f"Message is too long {len(msg_in)+t} when max is {self.galois.max_field_value}")
+        n = 255 if field_order == 8 else 65535
+        k, t = self.correction_capacity(n, degradation_percentage)
         generator_polynomial = self.rs_generator_poly(t)
-        _, remainder = super().gf_poly_div(msg_in + [0] * (len(generator_polynomial)-1),
-                                           generator_polynomial)
+        message_int = char_to_int(msg_in)  # base64 to ord
+        chunks = chunk_message(message_int, k)
+        redundacy, encoded = list(), list()
+        # chunking
+        for chunk in chunks:
+            if len(chunk) >= k:
+                _, remainder = super().gf_poly_div(chunk + [0] * (len(generator_polynomial)-1), generator_polynomial)
+                corrupted_chunk = corruption(chunk, n, k, t)
+                redundacy.extend(remainder)
+            encoded.extend(corrupted_chunk)
+        encoded = int_to_char(encoded)
         # msg_out = msg_in + remainder
-        return msg_in, remainder
+        return encoded, redundacy
 
 
 if __name__ == "__main__":
     gf_285 = GaloisField(0x11d, 8)
-    print(len(gf_285.look_up_tables[0]))
     n = 285
-    k = 239
-    message = "hello world"
+    message = b64encode(open("./arquivos_teste/bojack_horseman3.jpg", "rb").read()).decode("UTF-8")
     rs_encoder = RS_Encoder(gf_285)
-    encoded, ecc = rs_encoder.rs_encode_msg([ord(x) for x in message], n-k)
-    print(f"Original: {encoded}")
+    encoded, ecc = rs_encoder.rs_encode_msg(message, 8)
+    retrived = open("./arquivos_teste/bojack_horseman3_retrived.jpg", "wb")
+    retrived.write(b64decode(bytes(encoded, "UTF-8")))
+    print(f"Original: {len(encoded)}")
     print(f"Ecc symbols: {len(ecc)}")
