@@ -5,7 +5,7 @@ def bin16_bin8():
     pass
 
 
-def corruption(chunk: list, n: int, k: int, t: int):
+def corrupt_chunk(chunk: list, n: int, k: int, t: int):
     cryptogen = SystemRandom()
     random_numbers = [cryptogen.randrange(n) for i in range(t)]
     random_positions = [cryptogen.randrange(len(chunk)) for i in range(k)]

@@ -2,7 +2,7 @@ from math import ceil
 from base64 import b64encode, b64decode
 
 from galois_field import GaloisField
-from utils import char_to_int, chunk_message, int_to_char, corruption
+from utils import char_to_int, chunk_message, int_to_char, corrupt_chunk
 
 
 class RS_Encoder(GaloisField):
@@ -108,7 +108,7 @@ class RS_Encoder(GaloisField):
             dinality (eg, 255 for GF(2^8)).
 
         alpha: int
-            This must be a prime integer, such as 2, 3, 5, etc. In practice,
+            This must be a prime integer, such as 2, 3, 5, etc. In practice,        
             what is the generator? You know, when we use the log/antilog tables
             to do our computations, from what are these tables generated from?
             You guessed it: the generator number. Usually, it's set to 2, so the
@@ -133,34 +133,31 @@ class RS_Encoder(GaloisField):
 
         Raises
         ------
-        ValueError
-            If the msg_in is too long.
         """
         n = 255 if field_order == 8 else 65535
         k, t = self.correction_capacity(n, degradation_percentage)
         generator_polynomial = self.rs_generator_poly(t)
-        message_int = char_to_int(msg_in)  # base64 to ord
+        message_int = char_to_int(msg_in)  # base64 to ascii
         chunks = chunk_message(message_int, k)
         redundacy, encoded = list(), list()
         # chunking
         for chunk in chunks:
             if len(chunk) >= k:
-                _, remainder = super().gf_poly_div(chunk + [0] * (len(generator_polynomial)-1), generator_polynomial)
-                corrupted_chunk = corruption(chunk, n, k, t)
+                _, remainder = super().gf_poly_div(chunk + [0] * (len(generator_polynomial) - 1), generator_polynomial)
                 redundacy.extend(remainder)
-            encoded.extend(corrupted_chunk)
-        encoded = int_to_char(encoded)
-        # msg_out = msg_in + remainder
+            encoded.extend(chunk)
+        encoded, redundacy = int_to_char(encoded), int_to_char(redundacy)
         return encoded, redundacy
 
 
 if __name__ == "__main__":
     gf_285 = GaloisField(0x11d, 8)
     n = 285
-    message = b64encode(open("./arquivos_teste/bojack_horseman3.jpg", "rb").read()).decode("UTF-8")
+    message = b64encode(open("./arquivos_teste/2108_CJF_SUPR.pdf", "rb").read()).decode("UTF-8")
     rs_encoder = RS_Encoder(gf_285)
     encoded, ecc = rs_encoder.rs_encode_msg(message, 8)
-    retrived = open("./arquivos_teste/bojack_horseman3_retrived.jpg", "wb")
-    retrived.write(b64decode(bytes(encoded, "UTF-8")))
-    print(f"Original: {len(encoded)}")
-    print(f"Ecc symbols: {len(ecc)}")
+    retrived = open("./arquivos_teste/2108_CJF_SUPR_encoded.pdf", "wb").write(b64decode(bytes(encoded, "UTF-8")))
+    redundancy = open("./arquivos_teste/2108_CJF_SUPR_redundancy.pdf", "wb").write((bytes(ecc, "UTF-8")))
+    print(f"Original: {len(message)}")
+    print(f"Encoded: {len(encoded)}")
+    print(f"Redundancy: {len(ecc)}")
